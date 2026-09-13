@@ -2,6 +2,8 @@ package com.sky.service.impl;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.sky.constant.MessageConstant;
 import com.sky.dto.UserLoginDTO;
 import com.sky.entity.User;
@@ -20,7 +22,7 @@ import java.util.Map;
 
 @Service
 @Slf4j
-public class UserServiceImpl implements UserService {
+public class UserServiceImpl extends ServiceImpl<UserMapper,User> implements UserService {
     //微信服务接口地址
     public static final String WX_LOGIN = "https://api.weixin.qq.com/sns/jscode2session";
 
@@ -46,7 +48,9 @@ public class UserServiceImpl implements UserService {
         }
 
 //        判断当前用户是否为新用户
-        User user = userMapper.getByOpenId(openid);
+        LambdaQueryWrapper<User> wrapper=new LambdaQueryWrapper<>();
+        wrapper.eq(User::getOpenid,openid);
+        User user = userMapper.selectOne(wrapper);
 
 //        如果是新用户,自动完成注册
         if (user == null) {
@@ -74,7 +78,10 @@ public class UserServiceImpl implements UserService {
         map.put("grant_type","authorization_code");
         String json = HttpClientUtil.doGet(WX_LOGIN, map);
 
+
         JSONObject jsonObject = JSON.parseObject(json);
+
+
         String openid = jsonObject.getString("openid");
         return openid;
     }

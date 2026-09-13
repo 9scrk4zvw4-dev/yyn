@@ -1,7 +1,10 @@
 package com.sky.service.impl;
 
-import com.github.pagehelper.Page;
-import com.github.pagehelper.PageHelper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.sky.constant.MessageConstant;
 import com.sky.constant.PasswordConstant;
 import com.sky.constant.StatusConstant;
@@ -25,10 +28,9 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
-public class EmployeeServiceImpl implements EmployeeService {
+public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> implements EmployeeService {
 
-    @Autowired
-    private EmployeeMapper employeeMapper;
+
 
     /**
      * 员工登录
@@ -41,7 +43,9 @@ public class EmployeeServiceImpl implements EmployeeService {
         String password = employeeLoginDTO.getPassword();
 
         //1、根据用户名查询数据库中的数据
-        Employee employee = employeeMapper.getByUsername(username);
+        QueryWrapper<Employee> queryWrapper = new QueryWrapper<>();
+        queryWrapper.eq("username", username);
+        Employee employee = baseMapper.selectOne(queryWrapper);
 
         //2、处理各种异常情况（用户名不存在、密码不对、账号被锁定）
         if (employee == null) {
@@ -84,17 +88,17 @@ public class EmployeeServiceImpl implements EmployeeService {
         employee.setPassword(DigestUtils.md5DigestAsHex(PasswordConstant.DEFAULT_PASSWORD.getBytes()));
 
         //设置当前记录的创建时间和修改时间
-        employee.setCreateTime(LocalDateTime.now());
-        employee.setUpdateTime(LocalDateTime.now());
+//        employee.setCreateTime(LocalDateTime.now());
+//        employee.setUpdateTime(LocalDateTime.now());
+//
+//       通过ThreadLocal获取用户信息
+//        Long currentId = BaseContext.getCurrentId();
+//
+//        //设置当前记录创建人id和修改人id
+//        employee.setCreateUser(currentId);//目前写个假数据，后期修改
+//        employee.setUpdateUser(currentId);
 
-//        通过ThreadLocal获取用户信息
-        Long currentId = BaseContext.getCurrentId();
-
-        //设置当前记录创建人id和修改人id
-        employee.setCreateUser(currentId);//目前写个假数据，后期修改
-        employee.setUpdateUser(currentId);
-
-        employeeMapper.insert(employee);//后续步骤定义
+        baseMapper.insert(employee);//后续步骤定义
     }
 
     /**
@@ -104,15 +108,26 @@ public class EmployeeServiceImpl implements EmployeeService {
      */
     @Override
     public PageResult pageQuery(EmployeePageQueryDTO employeePageQueryDTO) {
-//        开始分页查询
-        PageHelper.startPage(employeePageQueryDTO.getPage(), employeePageQueryDTO.getPageSize());
+        // 1. 创建分页对象（当前页, 每页大小）
+        Page<Employee> page = new Page<>(employeePageQueryDTO.getPage(), employeePageQueryDTO.getPageSize());
 
-        Page<Employee> page = employeeMapper.pageQuery(employeePageQueryDTO);
+        // 2. 构建查询条件
+        LambdaQueryWrapper<Employee> wrapper = new LambdaQueryWrapper<>();
 
-        long total = page.getTotal();
-        List<Employee> records = page.getResult();
+        // 动态条件：如果 name 不为空，加模糊查询
+        if (employeePageQueryDTO.getName() != null && !employeePageQueryDTO.getName().isEmpty()) {
+            wrapper.like(Employee::getName, employeePageQueryDTO.getName());
+        }
 
-        return new PageResult(total, records);
+        // 排序：按创建时间倒序
+        wrapper.orderByDesc(Employee::getCreateTime);
+
+        // 3. 执行分页（MP 自动帮你做 COUNT + LIMIT）
+        baseMapper.selectPage(page, wrapper);
+
+        // 4. 封装结果
+        return new PageResult(page.getTotal(), page.getRecords());
+
     }
 
     /**
@@ -122,11 +137,11 @@ public class EmployeeServiceImpl implements EmployeeService {
      */
     @Override
     public void startOrStop(Integer status, Long id) {
-        Employee employee = Employee.builder()
-                .status(status)
-                .id(id)
-                .build();
-        employeeMapper.update(employee);
+        LambdaUpdateWrapper<Employee> wrapper = new LambdaUpdateWrapper<>();
+        wrapper.eq(Employee::getId,id).set(Employee::getStatus, status).set(Employee::getUpdateTime, LocalDateTime.now())
+                .set(Employee::getUpdateUser, BaseContext.getCurrentId());
+        baseMapper.update(null,wrapper);
+
     }
 
     /**
@@ -136,7 +151,7 @@ public class EmployeeServiceImpl implements EmployeeService {
      */
     @Override
     public Employee getById(Long id) {
-        Employee employee = employeeMapper.getById(id);
+        Employee employee = baseMapper.selectById(id);
         employee.setPassword("****");
         return employee;
     }
@@ -145,14 +160,14 @@ public class EmployeeServiceImpl implements EmployeeService {
      * 编辑员工信息
      * @param employeeDTO
      */
-    @Override
+//    @Override
     public void update(EmployeeDTO employeeDTO) {
         Employee employee = new Employee();
         BeanUtils.copyProperties(employeeDTO, employee);
 
-        employee.setUpdateTime(LocalDateTime.now());
-        employee.setUpdateUser(BaseContext.getCurrentId());
-        employeeMapper.update(employee);
+//        employee.setUpdateTime(LocalDateTime.now());
+//        employee.setUpdateUser(BaseContext.getCurrentId());
+        baseMapper. updateById(employee);
     }
 
 }

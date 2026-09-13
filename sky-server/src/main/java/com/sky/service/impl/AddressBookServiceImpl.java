@@ -1,5 +1,7 @@
 package com.sky.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.sky.context.BaseContext;
 import com.sky.entity.AddressBook;
 import com.sky.mapper.AddressBookMapper;
@@ -22,7 +24,18 @@ public class AddressBookServiceImpl implements AddressBookService {
      */
     @Override
     public List<AddressBook> list(AddressBook addressBook) {
-        return addressBookMapper.list(addressBook);
+        LambdaQueryWrapper<AddressBook> wrapper=new LambdaQueryWrapper<>();
+        if(addressBook.getUserId()!=null){
+            wrapper.eq(AddressBook::getUserId,addressBook.getUserId());
+        };
+        if(addressBook.getPhone()!=null){
+            wrapper.eq(AddressBook::getPhone,addressBook.getPhone());
+        };
+        if(addressBook.getIsDefault()!=null){
+            wrapper.eq(AddressBook::getIsDefault,addressBook.getIsDefault());
+        };
+        return addressBookMapper.selectList(wrapper);
+
     }
 
     /**
@@ -43,7 +56,7 @@ public class AddressBookServiceImpl implements AddressBookService {
      */
     @Override
     public AddressBook getById(Long id) {
-        return addressBookMapper.getById(id);
+        return addressBookMapper.selectById(id);
     }
 
     /**
@@ -52,7 +65,7 @@ public class AddressBookServiceImpl implements AddressBookService {
      */
     @Override
     public void update(AddressBook addressBook) {
-        addressBookMapper.update(addressBook);
+        addressBookMapper.updateById(addressBook);
     }
 
     /**
@@ -64,11 +77,13 @@ public class AddressBookServiceImpl implements AddressBookService {
         //1、将当前用户的所有地址修改为非默认地址 update address_book set is_default = ? where user_id = ?
         addressBook.setIsDefault(0);
         addressBook.setUserId(BaseContext.getCurrentId());
-        addressBookMapper.updateIsDefaultByUserId(addressBook);
+        LambdaUpdateWrapper<AddressBook> wrapper=new LambdaUpdateWrapper<>();
+        wrapper.eq(AddressBook::getUserId,addressBook.getUserId()).set(AddressBook::getIsDefault,addressBook.getIsDefault());
+        addressBookMapper.update(null,wrapper);
 
         //2、将当前地址改为默认地址 update address_book set is_default = ? where id = ?
         addressBook.setIsDefault(1);
-        addressBookMapper.update(addressBook);
+        addressBookMapper.updateById(addressBook);
     }
 
     /**

@@ -1,5 +1,6 @@
 package com.sky.service;
 
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.sky.dto.SetmealDTO;
 import com.sky.dto.SetmealPageQueryDTO;
 import com.sky.entity.Setmeal;

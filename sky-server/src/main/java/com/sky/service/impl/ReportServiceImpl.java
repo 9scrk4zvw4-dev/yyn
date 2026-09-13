@@ -1,7 +1,9 @@
 package com.sky.service.impl;
 
 import com.sky.dto.GoodsSalesDTO;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.sky.entity.Orders;
+import com.sky.entity.User;
 import com.sky.mapper.OrderMapper;
 import com.sky.mapper.UserMapper;
 import com.sky.service.ReportService;
@@ -259,11 +261,10 @@ public class ReportServiceImpl implements ReportService {
      * @return
      */
     private Integer getOrderCount(LocalDateTime beginTime, LocalDateTime endTime, Integer status) {
-        Map map = new HashMap();
-        map.put("status", status);
-        map.put("begin", beginTime);
-        map.put("end", endTime);
-        return orderMapper.countByMap(map);
+        return orderMapper.selectCount(new LambdaQueryWrapper<Orders>()
+                .eq(status != null, Orders::getStatus, status)
+                .ge(Orders::getOrderTime, beginTime)
+                .le(Orders::getOrderTime, endTime)).intValue();
     }
 
     /**
@@ -274,9 +275,8 @@ public class ReportServiceImpl implements ReportService {
      * @return
      */
     private Integer getUserCount(LocalDateTime beginTime, LocalDateTime endTime) {
-        Map map = new HashMap();
-        map.put("begin", beginTime);
-        map.put("end", endTime);
-        return userMapper.countByMap(map);
+        return userMapper.selectCount(new LambdaQueryWrapper<User>()
+                .ge(User::getCreateTime, beginTime)
+                .le(User::getCreateTime, endTime)).intValue();
     }
 }

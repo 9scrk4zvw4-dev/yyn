@@ -12,13 +12,13 @@ spring:
       url: jdbc:mysql://localhost:3306/sky_take_out
       username: root
       password: "123456"
-#  redis:
-#    host: ${sky.redis.host}
-#    port: ${sky.redis.port}
-#    password: ${sky.redis.password}
-#    database: ${sky.redis.database}
+  redis:
+    host: ${sky.redis.host}
+    port: ${sky.redis.port}
+    password: ${sky.redis.password}
+    database: ${sky.redis.database}
 
-mybatis:
+mybatis-plus:
   #mapper配置文件
   mapper-locations: classpath:mapper/*.xml
   type-aliases-package: com.sky.entity
@@ -62,5 +62,10 @@ sky:
     refundNotifyUrl: ${sky.wechat.refundNotifyUrl}
   shop:
     address: 湖北省武汉市洪山区徐东大街18号
-  baidu:
-    ak: EFEEFFEFEFE
+  amap:
+    key: ${sky.amap.key}
+  ai:
+    dashscope:
+      api-key: ${sky.ai.dashscope.api-key}
+      model: ${sky.ai.dashscope.model}
+      base-url: ${sky.ai.dashscope.base-url}

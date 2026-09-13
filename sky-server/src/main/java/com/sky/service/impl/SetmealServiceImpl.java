@@ -1,7 +1,8 @@
 package com.sky.service.impl;
 
-import com.github.pagehelper.Page;
-import com.github.pagehelper.PageHelper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.sky.constant.MessageConstant;
 import com.sky.constant.StatusConstant;
 import com.sky.dto.SetmealDTO;
@@ -28,7 +29,7 @@ import java.util.List;
 
 @Service
 @Slf4j
-public class SetmealServiceImpl implements SetmealService {
+public class SetmealServiceImpl extends ServiceImpl<SetmealMapper,Setmeal> implements SetmealService {
 
     @Autowired
     private SetmealMapper setmealMapper;
@@ -60,7 +61,7 @@ public class SetmealServiceImpl implements SetmealService {
         setmealDishes.forEach(setmealDish -> setmealDish.setSetmealId(id));
 
 //        保存套餐和菜品的关联关系
-        setmealDishMapper.insertBatch(setmealDishes);
+        setmealDishes.forEach(setmealDishMapper::insert);
     }
 
     /**
@@ -70,10 +71,9 @@ public class SetmealServiceImpl implements SetmealService {
      */
     @Override
     public PageResult pageQuery(SetmealPageQueryDTO setmealPageQueryDTO) {
-        PageHelper.startPage(setmealPageQueryDTO.getPage(), setmealPageQueryDTO.getPageSize());
-
-        Page<SetmealVO> page = setmealMapper.pageQuery(setmealPageQueryDTO);
-        return new PageResult(page.getTotal(), page.getResult());
+        Page<SetmealVO> page = new Page<>(setmealPageQueryDTO.getPage(), setmealPageQueryDTO.getPageSize());
+        setmealMapper.pageQuery(page, setmealPageQueryDTO);
+        return new PageResult(page.getTotal(), page.getRecords());
     }
 
     /**
@@ -84,7 +84,7 @@ public class SetmealServiceImpl implements SetmealService {
     public void deleteBatch(List<Long> ids) {
 //        起售中的套餐不能删除
         ids.forEach(id->{
-            Setmeal setmeal = setmealMapper.getById(id);
+            Setmeal setmeal = setmealMapper.selectById(id);
             if (StatusConstant.ENABLE == setmeal.getStatus()) {
                 throw new DeletionNotAllowedException(MessageConstant.SETMEAL_ON_SALE);
             }
@@ -95,7 +95,7 @@ public class SetmealServiceImpl implements SetmealService {
             setmealMapper.deleteById(id);
 
 //            删除套餐餐品关系表中的数据
-            setmealDishMapper.deleteBySetmaleId(id);
+            setmealDishMapper.delete(new LambdaQueryWrapper<SetmealDish>().eq(SetmealDish::getSetmealId, id));
         });
 
     }
@@ -110,11 +110,13 @@ public class SetmealServiceImpl implements SetmealService {
         SetmealVO setmealVO = new SetmealVO();
 
 //        查询套餐基本信息
-        Setmeal setmeal = setmealMapper.getById(id);
+        Setmeal setmeal = setmealMapper.selectById(id);
         BeanUtils.copyProperties(setmeal, setmealVO);
 
 //        根据套餐信息查询菜品信息
-        List<SetmealDish> setmealDishList = setmealDishMapper.getBySetmealId(id);
+        LambdaQueryWrapper<SetmealDish> wrapper=new LambdaQueryWrapper<>();
+        wrapper.eq(SetmealDish::getSetmealId,id);
+        List<SetmealDish> setmealDishList = setmealDishMapper.selectList(wrapper);
         setmealVO.setSetmealDishes(setmealDishList);
 
         return setmealVO;
@@ -130,19 +132,19 @@ public class SetmealServiceImpl implements SetmealService {
         BeanUtils.copyProperties(setmealDTO, setmeal);
 
 //        1.修改套餐表，执行update
-        setmealMapper.update(setmeal);
+        setmealMapper.updateById(setmeal);
 
 //        套餐id
         Long id = setmealDTO.getId();
 
 //        2.删除套餐和菜品的关联关系
-        setmealDishMapper.deleteBySetmaleId(setmealDTO.getId());
+        setmealDishMapper.delete(new LambdaQueryWrapper<SetmealDish>().eq(SetmealDish::getSetmealId, setmealDTO.getId()));
 
         List<SetmealDish> setmealDishes = setmealDTO.getSetmealDishes();
         setmealDishes.forEach(setmealDish -> setmealDish.setSetmealId(id));
 
 //        3.重新插入套餐和菜品的关联关系
-        setmealDishMapper.insertBatch(setmealDishes);
+        setmealDishes.forEach(setmealDishMapper::insert);
     }
 
     /**
@@ -168,7 +170,7 @@ public class SetmealServiceImpl implements SetmealService {
                 .id(id)
                 .status(status)
                 .build();
-        setmealMapper.update(setmeal);
+        setmealMapper.updateById(setmeal);
     }
 
     /**
@@ -178,8 +180,19 @@ public class SetmealServiceImpl implements SetmealService {
      */
     @Override
     public List<Setmeal> list(Setmeal setmeal) {
-        return setmealMapper.list(setmeal);
+        LambdaQueryWrapper<Setmeal> wrapper = new LambdaQueryWrapper<>();
+        if(setmeal.getName()!=null){
+            wrapper.like(Setmeal::getName,setmeal.getName());
+        };
+        if(setmeal.getCategoryId()!=null){
+            wrapper.eq(Setmeal::getCategoryId,setmeal.getCategoryId());
+        };
+        if(setmeal.getStatus()!=null){
+            wrapper.eq(Setmeal::getStatus,setmeal.getStatus());
+        };
+        return baseMapper.selectList(wrapper);
     }
+
 
     /**
      * 根据id查询菜品选项

@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 @RestController("userDishController")
 @RequestMapping("/user/dish")
@@ -41,8 +42,8 @@ public class DishController {
 
 //        查询redis中是否存在菜品数据
         List<DishVO> list = (List<DishVO>) redisTemplate.opsForValue().get(key);
-        if (list != null && list.size() > 0) {
-//            如果存在，直接返回，无需查询数据库
+        if (list != null) {
+//            如果存在（包括空列表），直接返回，无需查询数据库，防止缓存穿透
             return Result.success(list);
         }
 
@@ -54,8 +55,8 @@ public class DishController {
 
         list = dishService.listWithFlavor(dish);
 
-//        放入redis
-        redisTemplate.opsForValue().set(key, list);
+//        放入redis，并设置过期时间为1小时，防止缓存污染
+        redisTemplate.opsForValue().set(key, list, 1, TimeUnit.HOURS);
         return Result.success(list);
     }
 

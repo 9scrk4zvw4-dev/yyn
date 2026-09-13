@@ -1,5 +1,6 @@
 package com.sky.task;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.sky.entity.Orders;
 import com.sky.mapper.OrderMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -30,14 +31,16 @@ public class OrderTask {
 
         LocalDateTime time = LocalDateTime.now().plusMinutes(-15);
 
-        List<Orders> ordersList = orderMapper.getByStatusAndOrderTime(Orders.PENDING_PAYMENT, time);
+        List<Orders> ordersList = orderMapper.selectList(new LambdaQueryWrapper<Orders>()
+                .eq(Orders::getStatus, Orders.PENDING_PAYMENT)
+                .lt(Orders::getOrderTime, time));
 
         if (ordersList != null && ordersList.size() > 0) {
             ordersList.forEach(orders -> {
                 orders.setStatus(Orders.CANCELLED);
                 orders.setCancelReason("支付超时，自动取消");
                 orders.setCancelTime(LocalDateTime.now());
-                orderMapper.update(orders);
+                orderMapper.updateById(orders);
             });
         }
     }
@@ -51,12 +54,14 @@ public class OrderTask {
 
         LocalDateTime time = LocalDateTime.now().plusMinutes(-60);
 
-        List<Orders> ordersList = orderMapper.getByStatusAndOrderTime(Orders.DELIVERY_IN_PROGRESS, time);
+        List<Orders> ordersList = orderMapper.selectList(new LambdaQueryWrapper<Orders>()
+                .eq(Orders::getStatus, Orders.DELIVERY_IN_PROGRESS)
+                .lt(Orders::getOrderTime, time));
 
         if (ordersList != null && ordersList.size() > 0) {
             ordersList.forEach(orders -> {
                 orders.setStatus(Orders.COMPLETED);
-                orderMapper.update(orders);
+                orderMapper.updateById(orders);
             });
         }
     }

@@ -1,5 +1,6 @@
 package com.sky.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.sky.context.BaseContext;
 import com.sky.dto.ShoppingCartDTO;
 import com.sky.entity.Dish;
@@ -9,6 +10,7 @@ import com.sky.mapper.DishMapper;
 import com.sky.mapper.SetmealMapper;
 import com.sky.mapper.ShoppingCartMapper;
 import com.sky.service.ShoppingCartService;
+import org.apache.xmlbeans.impl.xb.xsdschema.impl.SimpleTypeImpl;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -41,25 +43,37 @@ public class ShoppingCartServiceImpl implements ShoppingCartService {
         shoppingCart.setUserId(BaseContext.getCurrentId());
 
 //        判断当前商品是否在购物车中
-        List<ShoppingCart> shoppingCartsList = shoppingCartMapper.list(shoppingCart);
-
+        LambdaQueryWrapper<ShoppingCart> wrapper=new LambdaQueryWrapper();
+        if(shoppingCart.getName()!=null){
+            wrapper.eq(ShoppingCart::getName,shoppingCart.getName());
+        };
+        if(shoppingCart.getDishId()!=null){
+            wrapper.eq(ShoppingCart::getDishId,shoppingCart.getDishId());
+        };
+        if(shoppingCart.getSetmealId()!=null){
+            wrapper.eq(ShoppingCart::getSetmealId,shoppingCart.getSetmealId());
+        };
+        if(shoppingCart.getDishFlavor()!=null){
+            wrapper.eq(ShoppingCart::getDishFlavor,shoppingCart.getDishFlavor());
+        };
+        List<ShoppingCart> shoppingCartsList=shoppingCartMapper.selectList(wrapper);
         if (shoppingCartsList != null && shoppingCartsList.size() > 0) {
 //            如果存在，就更新数量，+1
             shoppingCart = shoppingCartsList.get(0);
             shoppingCart.setNumber(shoppingCart.getNumber() + 1);
-            shoppingCartMapper.updateNumberById(shoppingCart);
+            shoppingCartMapper.updateById(shoppingCart);
         } else {
 //            如果不存在，插入数据
             Long dishId = shoppingCartDTO.getDishId();
             if (dishId != null) {
 //                添加到购物车的是菜品
-                Dish dish = dishMapper.getById(dishId);
+                Dish dish = dishMapper.selectById(dishId);
                 shoppingCart.setName(dish.getName());
                 shoppingCart.setImage(dish.getImage());
                 shoppingCart.setAmount(dish.getPrice());
             } else {
 //                添加到购物车的是套餐
-                Setmeal setmeal = setmealMapper.getById(shoppingCartDTO.getSetmealId());
+                Setmeal setmeal = setmealMapper.selectById(shoppingCartDTO.getSetmealId());
                 shoppingCart.setName(setmeal.getName());
                 shoppingCart.setImage(setmeal.getImage());
                 shoppingCart.setAmount(setmeal.getPrice());
@@ -76,7 +90,21 @@ public class ShoppingCartServiceImpl implements ShoppingCartService {
      */
     @Override
     public List<ShoppingCart> showShoppingCart() {
-        return shoppingCartMapper.list(ShoppingCart.builder().userId(BaseContext.getCurrentId()).build());
+        ShoppingCart shoppingCart=ShoppingCart.builder().userId(BaseContext.getCurrentId()).build();
+        LambdaQueryWrapper<ShoppingCart> wrapper=new LambdaQueryWrapper();
+        if(shoppingCart.getName()!=null){
+            wrapper.eq(ShoppingCart::getName,shoppingCart.getName());
+        };
+        if(shoppingCart.getDishId()!=null){
+            wrapper.eq(ShoppingCart::getDishId,shoppingCart.getDishId());
+        };
+        if(shoppingCart.getSetmealId()!=null){
+            wrapper.eq(ShoppingCart::getSetmealId,shoppingCart.getSetmealId());
+        };
+        if(shoppingCart.getDishFlavor()!=null){
+            wrapper.eq(ShoppingCart::getDishFlavor,shoppingCart.getDishFlavor());
+        };
+        return shoppingCartMapper.selectList(wrapper);
     }
 
     /**
@@ -84,7 +112,12 @@ public class ShoppingCartServiceImpl implements ShoppingCartService {
      */
     @Override
     public void cleanShoppingCart() {
-        shoppingCartMapper.deleteByUserId(BaseContext.getCurrentId());
+        ShoppingCart shoppingCart=new ShoppingCart();
+        shoppingCart.setUserId(BaseContext.getCurrentId());
+        LambdaQueryWrapper<ShoppingCart> wrapper=new LambdaQueryWrapper();
+        wrapper.eq(ShoppingCart::getUserId,shoppingCart.getUserId());
+        shoppingCartMapper.delete(wrapper);
+
     }
 
     /**
@@ -98,8 +131,21 @@ public class ShoppingCartServiceImpl implements ShoppingCartService {
 
 //        设置查询条件，查询当前登录用户的购物车数据
         shoppingCart.setUserId(BaseContext.getCurrentId());
+        LambdaQueryWrapper<ShoppingCart> wrapper=new LambdaQueryWrapper();
+        if(shoppingCart.getName()!=null){
+            wrapper.eq(ShoppingCart::getName,shoppingCart.getName());
+        };
+        if(shoppingCart.getDishId()!=null){
+            wrapper.eq(ShoppingCart::getDishId,shoppingCart.getDishId());
+        };
+        if(shoppingCart.getSetmealId()!=null){
+            wrapper.eq(ShoppingCart::getSetmealId,shoppingCart.getSetmealId());
+        };
+        if(shoppingCart.getDishFlavor()!=null){
+            wrapper.eq(ShoppingCart::getDishFlavor,shoppingCart.getDishFlavor());
+        };
 
-        List<ShoppingCart> list = shoppingCartMapper.list(shoppingCart);
+        List<ShoppingCart> list = shoppingCartMapper.selectList(wrapper);
         if (list != null && list.size() > 0) {
             shoppingCart = list.get(0);
 
@@ -110,7 +156,7 @@ public class ShoppingCartServiceImpl implements ShoppingCartService {
             } else {
 //                当前商品在购物车中的份数不为1，修改份数即可
                 shoppingCart.setNumber(shoppingCart.getNumber() - 1);
-                shoppingCartMapper.updateNumberById(shoppingCart);
+                shoppingCartMapper.updateById(shoppingCart);
             }
         }
     }

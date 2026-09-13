@@ -1,7 +1,7 @@
 sky:
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    host: 192.168.118.1
+    host: localhost
     port: 3306
     database: sky_take_out
     username: root
@@ -12,13 +12,13 @@ sky:
     access-key-secret: YOUR_ACCESS_KEY_SECRET
     bucket-name: sky-take-out
   redis:
-    host: 192.168.8.128
+    host: 192.168.118.129
     port: 6379
     password:
-    database: 10
+    database: 0
   wechat:
-    appid: wx9e8dde9d2df9df58
-    secret: 7a354c0cab2186281c18839acf453e37
+    appid: wx281746af7bebac08
+    secret: 04f5d68c048299b5b6c0fa20c4938e4a
     mchid: 1561414331
     mchSerialNo: 4B3B3DC35414AD50B1B755BAF8DE9CC7CF407606
     privateKeyFilePath: D:\apiclient_key.pem
@@ -26,3 +26,10 @@ sky:
     weChatPayCertFilePath: D:\wechatpay_166D96F876F45C7D07CE98952A96EC980368ACFC.pem
     notifyUrl: https://www.weixin.qq.com/wxpay/pay.php
     refundNotifyUrl: https://www.weixin.qq.com/wxpay/pay.php
+  ai:
+    dashscope:
+      api-key: YOUR_DASHSCOPE_API_KEY
+      model: qwen-plus
+      base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  amap:
+    key: 你的高德地图Web服务KEY

@@ -1,13 +1,18 @@
 package com.sky.service.impl;
 
-import com.github.pagehelper.Page;
-import com.github.pagehelper.PageHelper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.sky.constant.MessageConstant;
 import com.sky.constant.StatusConstant;
 import com.sky.context.BaseContext;
 import com.sky.dto.CategoryDTO;
 import com.sky.dto.CategoryPageQueryDTO;
 import com.sky.entity.Category;
+import com.sky.entity.Dish;
+import com.sky.entity.Employee;
+import com.sky.entity.Setmeal;
 import com.sky.exception.DeletionNotAllowedException;
 import com.sky.mapper.CategoryMapper;
 import com.sky.mapper.DishMapper;
@@ -18,6 +23,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.util.DigestUtils;
+
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -26,10 +33,8 @@ import java.util.List;
  */
 @Service
 @Slf4j
-public class CategoryServiceImpl implements CategoryService {
+public class CategoryServiceImpl extends ServiceImpl<CategoryMapper, Category> implements CategoryService {
 
-    @Autowired
-    private CategoryMapper categoryMapper;
     @Autowired
     private DishMapper dishMapper;
     @Autowired
@@ -41,19 +46,25 @@ public class CategoryServiceImpl implements CategoryService {
      */
     public void save(CategoryDTO categoryDTO) {
         Category category = new Category();
-        //属性拷贝
+
+        //对象属性拷贝
         BeanUtils.copyProperties(categoryDTO, category);
 
-        //分类状态默认为禁用状态0
-        category.setStatus(StatusConstant.DISABLE);
-
-        //设置创建时间、修改时间、创建人、修改人
+//        //设置账号的状态，默认正常状态 1表示正常 0表示锁定
+//        category.setStatus(StatusConstant.DISABLE);
+//
+//        //设置当前记录的创建时间和修改时间
 //        category.setCreateTime(LocalDateTime.now());
 //        category.setUpdateTime(LocalDateTime.now());
-//        category.setCreateUser(BaseContext.getCurrentId());
-//        category.setUpdateUser(BaseContext.getCurrentId());
+//
+//       通过ThreadLocal获取用户信息
+//        Long currentId = BaseContext.getCurrentId();
+//
+//        //设置当前记录创建人id和修改人id
+//        category.setCreateUser(currentId);
+//        category.setUpdateUser(currentId);
 
-        categoryMapper.insert(category);
+        baseMapper.insert(category);//后续步骤定义
     }
 
     /**
@@ -62,10 +73,29 @@ public class CategoryServiceImpl implements CategoryService {
      * @return
      */
     public PageResult pageQuery(CategoryPageQueryDTO categoryPageQueryDTO) {
-        PageHelper.startPage(categoryPageQueryDTO.getPage(),categoryPageQueryDTO.getPageSize());
-        //下一条sql进行分页，自动加入limit关键字分页
-        Page<Category> page = categoryMapper.pageQuery(categoryPageQueryDTO);
-        return new PageResult(page.getTotal(), page.getResult());
+        // 1. 创建分页对象（当前页, 每页大小）
+        com.baomidou.mybatisplus.extension.plugins.pagination.Page<Category> page = new Page<>(categoryPageQueryDTO.getPage(), categoryPageQueryDTO.getPageSize());
+
+        // 2. 构建查询条件
+        LambdaQueryWrapper<Category> wrapper = new LambdaQueryWrapper<>();
+
+        // 动态条件：如果 name 不为空，加模糊查询
+        if (categoryPageQueryDTO.getName() != null && !categoryPageQueryDTO.getName().isEmpty()) {
+            wrapper.like(Category::getName, categoryPageQueryDTO.getName());
+        }
+        if (categoryPageQueryDTO.getType() != null){
+            wrapper.eq(Category::getType,categoryPageQueryDTO.getType());
+        }
+
+        // 排序：按创建时间倒序
+        wrapper.orderByAsc(Category::getSort)
+                .orderByDesc(Category::getCreateTime);;
+
+        // 3. 执行分页（MP 自动帮你做 COUNT + LIMIT）
+        baseMapper.selectPage(page, wrapper);
+
+        // 4. 封装结果
+        return new PageResult(page.getTotal(), page.getRecords());
     }
 
     /**
@@ -74,21 +104,21 @@ public class CategoryServiceImpl implements CategoryService {
      */
     public void deleteById(Long id) {
         //查询当前分类是否关联了菜品，如果关联了就抛出业务异常
-        Integer count = dishMapper.countByCategoryId(id);
+        Long count = dishMapper.selectCount(new LambdaQueryWrapper<Dish>().eq(Dish::getCategoryId, id));
         if(count > 0){
             //当前分类下有菜品，不能删除
             throw new DeletionNotAllowedException(MessageConstant.CATEGORY_BE_RELATED_BY_DISH);
         }
 
         //查询当前分类是否关联了套餐，如果关联了就抛出业务异常
-        count = setmealMapper.countByCategoryId(id);
-        if(count > 0){
+        Long setmealCount = setmealMapper.selectCount(new LambdaQueryWrapper<Setmeal>().eq(Setmeal::getCategoryId, id));
+        if(setmealCount > 0){
             //当前分类下有菜品，不能删除
             throw new DeletionNotAllowedException(MessageConstant.CATEGORY_BE_RELATED_BY_SETMEAL);
         }
 
         //删除分类数据
-        categoryMapper.deleteById(id);
+       baseMapper.deleteById(id);
     }
 
     /**
@@ -97,13 +127,11 @@ public class CategoryServiceImpl implements CategoryService {
      */
     public void update(CategoryDTO categoryDTO) {
         Category category = new Category();
-        BeanUtils.copyProperties(categoryDTO,category);
+        BeanUtils.copyProperties(categoryDTO, category);
 
-        //设置修改时间、修改人
 //        category.setUpdateTime(LocalDateTime.now());
 //        category.setUpdateUser(BaseContext.getCurrentId());
-
-        categoryMapper.update(category);
+        baseMapper. updateById(category);
     }
 
     /**
@@ -112,13 +140,10 @@ public class CategoryServiceImpl implements CategoryService {
      * @param id
      */
     public void startOrStop(Integer status, Long id) {
-        Category category = Category.builder()
-                .id(id)
-                .status(status)
-                .updateTime(LocalDateTime.now())
-                .updateUser(BaseContext.getCurrentId())
-                .build();
-        categoryMapper.update(category);
+        LambdaUpdateWrapper<Category> wrapper = new LambdaUpdateWrapper<>();
+        wrapper.eq(Category::getId,id).set(Category::getStatus, status).set(Category::getUpdateTime, LocalDateTime.now())
+                .set(Category::getUpdateUser, BaseContext.getCurrentId());
+        baseMapper.update(null,wrapper);
     }
 
     /**
@@ -127,6 +152,14 @@ public class CategoryServiceImpl implements CategoryService {
      * @return
      */
     public List<Category> list(Integer type) {
-        return categoryMapper.list(type);
+        LambdaQueryWrapper<Category> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Category::getStatus, 1);
+        if (type != null) {
+            wrapper.eq(Category::getType, type);
+        }
+        wrapper.orderByAsc(Category::getSort)
+                .orderByDesc(Category::getCreateTime);
+
+        return baseMapper.selectList(wrapper);
     }
 }

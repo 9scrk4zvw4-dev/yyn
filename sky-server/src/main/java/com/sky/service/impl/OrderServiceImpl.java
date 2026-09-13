@@ -3,8 +3,9 @@ package com.sky.service.impl;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
-import com.github.pagehelper.Page;
-import com.github.pagehelper.PageHelper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.sky.constant.MessageConstant;
 import com.sky.context.BaseContext;
 import com.sky.dto.*;
@@ -40,7 +41,7 @@ import java.util.stream.Collectors;
 
 @Service
 @Slf4j
-public class OrderServiceImpl implements OrderService {
+public class OrderServiceImpl extends ServiceImpl<OrderMapper,Orders> implements OrderService {
 
     @Autowired
     private OrderMapper orderMapper;
@@ -63,8 +64,8 @@ public class OrderServiceImpl implements OrderService {
     @Value("${sky.shop.address}")
     private String shopAddress;
 
-    @Value("${sky.baidu.ak}")
-    private String ak;
+    @Value("${sky.amap.key}")
+    private String amapKey;
 
     @Autowired
     private WebSocketServer webSocketServer;
@@ -77,7 +78,7 @@ public class OrderServiceImpl implements OrderService {
     @Override
     public OrderSubmitVO submitOrder(OrdersSubmitDTO ordersSubmitDTO) {
 //        异常情况的处理（收货地址为空、超出配送氛围、购物车为空）
-        AddressBook addressBook = addressBookMapper.getById(ordersSubmitDTO.getAddressBookId());
+        AddressBook addressBook = addressBookMapper.selectById(ordersSubmitDTO.getAddressBookId());
         if (addressBook == null) {
             throw new AddressBookBusinessException(MessageConstant.ADDRESS_BOOK_IS_NULL);
         }
@@ -92,7 +93,20 @@ public class OrderServiceImpl implements OrderService {
         shoppingCart.setUserId(currentId);
 
 //        查询当前用户的购物车数据
-        List<ShoppingCart> shoppingCartList = shoppingCartMapper.list(shoppingCart);
+        LambdaQueryWrapper<ShoppingCart> wrapper=new LambdaQueryWrapper();
+        if(shoppingCart.getName()!=null){
+            wrapper.eq(ShoppingCart::getName,shoppingCart.getName());
+        };
+        if(shoppingCart.getDishId()!=null){
+            wrapper.eq(ShoppingCart::getDishId,shoppingCart.getDishId());
+        };
+        if(shoppingCart.getSetmealId()!=null){
+            wrapper.eq(ShoppingCart::getSetmealId,shoppingCart.getSetmealId());
+        };
+        if(shoppingCart.getDishFlavor()!=null){
+            wrapper.eq(ShoppingCart::getDishFlavor,shoppingCart.getDishFlavor());
+        };
+        List<ShoppingCart> shoppingCartList = shoppingCartMapper.selectList(wrapper);
         if (shoppingCartList == null || shoppingCartList.size() == 0) {
             throw new ShoppingCartBusinessException(MessageConstant.SHOPPING_CART_IS_NULL);
         }
@@ -119,11 +133,13 @@ public class OrderServiceImpl implements OrderService {
             orderDetailList.add(orderDetail);
         });
 
-//        向明细表中查询n条数据
-        orderDetailMapper.insertBatch(orderDetailList);
+//        向明细表中插入n条数据
+        orderDetailList.forEach(orderDetailMapper::insert);
 
 //        清理购物车中的数据
-        shoppingCartMapper.deleteByUserId(currentId);
+        LambdaQueryWrapper<ShoppingCart> wrapperr=new LambdaQueryWrapper();
+        wrapperr.eq(ShoppingCart::getUserId,shoppingCart.getUserId());
+        shoppingCartMapper.delete(wrapper);
 
 //        封装返回结果
         OrderSubmitVO submitVO = OrderSubmitVO.builder()
@@ -146,27 +162,44 @@ public class OrderServiceImpl implements OrderService {
     public OrderPaymentVO payment(OrdersPaymentDTO ordersPaymentDTO) throws Exception {
 //        当前登录用户id
         Long userId = BaseContext.getCurrentId();
-        User user = userMapper.getById(String.valueOf(userId));
+        User user = userMapper.selectById(String.valueOf(userId));
 
         String orderNumber = ordersPaymentDTO.getOrderNumber();
-        Orders orders = orderMapper.getByNumberAndUserId(orderNumber, userId);
+        Orders orders = orderMapper.selectOne(new LambdaQueryWrapper<Orders>()
+                .eq(Orders::getNumber, orderNumber)
+                .eq(Orders::getUserId, userId));
 
-//        调用微信支付接口，生成预支付交易单
-        JSONObject jsonObject = weChatPayUtil.pay(
-                ordersPaymentDTO.getOrderNumber(),
-                orders.getAmount(),
-                "苍穹外卖订单" + orders.getId(),
-                user.getOpenid()
-        );
+        // TODO: 临时跳过真实微信支付，直接调用paySuccess让订单变为已支付状态
+        try {
+            JSONObject jsonObject = weChatPayUtil.pay(
+                    ordersPaymentDTO.getOrderNumber(),
+                    orders.getAmount(),
+                    "苍穹外卖订单" + orders.getId(),
+                    user.getOpenid()
+            );
 
-        if (jsonObject.getString("code") != null && jsonObject.getString("code").equals("ORDERPAID")) {
-            throw new OrderBusinessException("该订单已支付");
+            if (jsonObject.getString("code") != null && jsonObject.getString("code").equals("ORDERPAID")) {
+                throw new OrderBusinessException("该订单已支付");
+            }
+
+            OrderPaymentVO vo = jsonObject.toJavaObject(OrderPaymentVO.class);
+            vo.setPackageStr(jsonObject.getString("package"));
+            // 真实支付成功后由微信回调paySuccess，这里仅返回支付参数
+            return vo;
+        } catch (Exception e) {
+            // 微信支付文件不存在等异常，直接模拟支付成功
+            log.warn("微信支付调用失败，模拟支付成功: {}", e.getMessage());
+            // 直接把订单变为已支付状态
+            paySuccess(ordersPaymentDTO.getOrderNumber());
+
+            OrderPaymentVO vo = new OrderPaymentVO();
+            vo.setTimeStamp(String.valueOf(System.currentTimeMillis() / 1000));
+            vo.setNonceStr("mock_nonce_str_123456");
+            vo.setSignType("RSA");
+            vo.setPaySign("mock_pay_sign");
+            vo.setPackageStr("prepay_id=wx_mock_prepay_id");
+            return vo;
         }
-
-        OrderPaymentVO vo = jsonObject.toJavaObject(OrderPaymentVO.class);
-        vo.setPackageStr(jsonObject.getString("package"));
-
-        return vo;
     }
 
     /**
@@ -179,7 +212,9 @@ public class OrderServiceImpl implements OrderService {
         Long userId = BaseContext.getCurrentId();
 
 //        根据订单号查询当前用户的订单
-        Orders orderDB = orderMapper.getByNumberAndUserId(outTradeNo, userId);
+        Orders orderDB = orderMapper.selectOne(new LambdaQueryWrapper<Orders>()
+                .eq(Orders::getNumber, outTradeNo)
+                .eq(Orders::getUserId, userId));
 
 //        根据订单id更新订单的状态、支付方式、支付状态、结账时间
         Orders orders = Orders.builder()
@@ -188,7 +223,7 @@ public class OrderServiceImpl implements OrderService {
                 .payStatus(Orders.PAID)
                 .checkoutTime(LocalDateTime.now())
                 .build();
-        orderMapper.update(orders);
+        orderMapper.updateById(orders);
 
         HashMap map = new HashMap();
         map.put("type", 1);
@@ -210,25 +245,25 @@ public class OrderServiceImpl implements OrderService {
      */
     @Override
     public PageResult pageQueryForUser(int pageNum, int pageSize, Integer status) {
-//        设置分页
-        PageHelper.startPage(pageNum, pageSize);
+//        MP分页
+        Page<Orders> page = new Page<>(pageNum, pageSize);
 
-        OrdersPageQueryDTO ordersPageQueryDTO = new OrdersPageQueryDTO();
-        ordersPageQueryDTO.setUserId(BaseContext.getCurrentId());
-        ordersPageQueryDTO.setStatus(status);
+        LambdaQueryWrapper<Orders> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Orders::getUserId, BaseContext.getCurrentId());
+        wrapper.eq(status != null, Orders::getStatus, status);
+        wrapper.orderByDesc(Orders::getOrderTime);
 
-//        分页条件查询
-        Page<Orders> page = orderMapper.pageQuery(ordersPageQueryDTO);
+        orderMapper.selectPage(page, wrapper);
 
         ArrayList<OrderVO> list = new ArrayList<>();
 
 //        查询出订单明细，并封装入OrderVo进行响应
-        if (page != null && page.getTotal() > 0) {
-            page.forEach(orders -> {
+        if (page.getTotal() > 0) {
+            page.getRecords().forEach(orders -> {
                 Long ordersId = orders.getId();
 
 //                查询订单明细
-                List<OrderDetail> orderDetailList = orderDetailMapper.getByOrderId(ordersId);
+                List<OrderDetail> orderDetailList = orderDetailMapper.selectList(new LambdaQueryWrapper<OrderDetail>().eq(OrderDetail::getOrderId, ordersId));
 
                 OrderVO orderVO = new OrderVO();
                 BeanUtils.copyProperties(orders, orderVO);
@@ -248,10 +283,13 @@ public class OrderServiceImpl implements OrderService {
     @Override
     public OrderVO details(Long id) {
 //        根据id查询订单
-        Orders orders = orderMapper.getById(id);
+        Orders orders = orderMapper.selectById(id);
+        if (orders == null) {
+            return null;
+        }
 
 //        查询该订单对应的菜品/套餐明细
-        List<OrderDetail> orderDetailList = orderDetailMapper.getByOrderId(id);
+        List<OrderDetail> orderDetailList = orderDetailMapper.selectList(new LambdaQueryWrapper<OrderDetail>().eq(OrderDetail::getOrderId, id));
 
 //        将订单及其详情封装到OrderVo并返回
         OrderVO orderVO = new OrderVO();
@@ -268,7 +306,7 @@ public class OrderServiceImpl implements OrderService {
     @Override
     public void userCancelById(Long id) throws Exception {
 //        根据id查询订单
-        Orders orderDB = orderMapper.getById(id);
+        Orders orderDB = orderMapper.selectById(id);
 
 //        校验订单是否存在
         if (orderDB == null) {
@@ -301,7 +339,7 @@ public class OrderServiceImpl implements OrderService {
         orders.setStatus(Orders.CANCELLED);
         orders.setCancelReason("用户取消");
         orders.setCancelTime(LocalDateTime.now());
-        orderMapper.update(orders);
+        orderMapper.updateById(orders);
     }
 
     /**
@@ -314,7 +352,7 @@ public class OrderServiceImpl implements OrderService {
         Long userId = BaseContext.getCurrentId();
 
 //        根据订单id查询当前订单详情
-        List<OrderDetail> orderDetailList = orderDetailMapper.getByOrderId(id);
+        List<OrderDetail> orderDetailList = orderDetailMapper.selectList(new LambdaQueryWrapper<OrderDetail>().eq(OrderDetail::getOrderId, id));
 
 //        将订单详情对象转为购物车对象
         List<ShoppingCart> shoppingCartList = orderDetailList.stream().map(orderDetail -> {
@@ -329,7 +367,7 @@ public class OrderServiceImpl implements OrderService {
         }).collect(Collectors.toList());
 
 //        将购物车对象批量添加到购物车
-        shoppingCartMapper.insertBatch(shoppingCartList);
+        shoppingCartList.forEach(shoppingCartMapper::insert);
     }
 
     /**
@@ -339,13 +377,24 @@ public class OrderServiceImpl implements OrderService {
      */
     @Override
     public PageResult conditionSearch(OrdersPageQueryDTO ordersPageQueryDTO) {
-        PageHelper.startPage(ordersPageQueryDTO.getPage(), ordersPageQueryDTO.getPageSize());
+        Page<Orders> page = new Page<>(ordersPageQueryDTO.getPage(), ordersPageQueryDTO.getPageSize());
 
-        Page<Orders> pageQuery = orderMapper.pageQuery(ordersPageQueryDTO);
+        LambdaQueryWrapper<Orders> wrapper = new LambdaQueryWrapper<>();
+        wrapper.like(ordersPageQueryDTO.getNumber() != null && !ordersPageQueryDTO.getNumber().isEmpty(),
+                Orders::getNumber, ordersPageQueryDTO.getNumber());
+        wrapper.like(ordersPageQueryDTO.getPhone() != null && !ordersPageQueryDTO.getPhone().isEmpty(),
+                Orders::getPhone, ordersPageQueryDTO.getPhone());
+        wrapper.eq(ordersPageQueryDTO.getUserId() != null, Orders::getUserId, ordersPageQueryDTO.getUserId());
+        wrapper.eq(ordersPageQueryDTO.getStatus() != null, Orders::getStatus, ordersPageQueryDTO.getStatus());
+        wrapper.ge(ordersPageQueryDTO.getBeginTime() != null, Orders::getOrderTime, ordersPageQueryDTO.getBeginTime());
+        wrapper.le(ordersPageQueryDTO.getEndTime() != null, Orders::getOrderTime, ordersPageQueryDTO.getEndTime());
+        wrapper.orderByDesc(Orders::getOrderTime);
+
+        orderMapper.selectPage(page, wrapper);
 
 //        部分订单状态，需要额外返回订单菜品信息，将orders转化为orderVo
-        List<OrderVO> orderVoList = getOrderVoList(pageQuery);
-        return new PageResult(pageQuery.getTotal(), orderVoList);
+        List<OrderVO> orderVoList = getOrderVoList(page.getRecords());
+        return new PageResult(page.getTotal(), orderVoList);
     }
 
     /**
@@ -355,9 +404,9 @@ public class OrderServiceImpl implements OrderService {
     @Override
     public OrderStatisticsVO statistics() {
 //        根据状态，分别查询出接待单，待派送、派送中的订单数量
-        Integer toBeConfirmed = orderMapper.countStatus(Orders.TO_BE_CONFIRMED);
-        Integer confirmed = orderMapper.countStatus(Orders.CONFIRMED);
-        Integer deliveryInProgress = orderMapper.countStatus(Orders.DELIVERY_IN_PROGRESS);
+        Integer toBeConfirmed = orderMapper.selectCount(new LambdaQueryWrapper<Orders>().eq(Orders::getStatus, Orders.TO_BE_CONFIRMED)).intValue();
+        Integer confirmed = orderMapper.selectCount(new LambdaQueryWrapper<Orders>().eq(Orders::getStatus, Orders.CONFIRMED)).intValue();
+        Integer deliveryInProgress = orderMapper.selectCount(new LambdaQueryWrapper<Orders>().eq(Orders::getStatus, Orders.DELIVERY_IN_PROGRESS)).intValue();
 
 //        将查询出的数据封装
         OrderStatisticsVO orderStatisticsVO = new OrderStatisticsVO();
@@ -378,7 +427,7 @@ public class OrderServiceImpl implements OrderService {
                 .id(ordersCancelDTO.getId())
                 .status(Orders.CONFIRMED)
                 .build();
-        orderMapper.update(orders);
+        orderMapper.updateById(orders);
     }
 
     /**
@@ -388,7 +437,7 @@ public class OrderServiceImpl implements OrderService {
     @Override
     public void rejection(OrdersRejectionDTO ordersRejectionDTO) throws Exception {
 //        根据id查询订单
-        Orders ordersDB = orderMapper.getById(ordersRejectionDTO.getId());
+        Orders ordersDB = orderMapper.selectById(ordersRejectionDTO.getId());
 
 //        订单只有存在且状态为2（待接单）才可以拒单
         if (ordersDB == null || !ordersDB.getStatus().equals(Orders.TO_BE_CONFIRMED)) {
@@ -415,7 +464,7 @@ public class OrderServiceImpl implements OrderService {
         orders.setRejectionReason(ordersRejectionDTO.getRejectionReason());
         orders.setCancelTime(LocalDateTime.now());
 
-        orderMapper.update(orders);
+        orderMapper.updateById(orders);
     }
 
     /**
@@ -425,7 +474,7 @@ public class OrderServiceImpl implements OrderService {
     @Override
     public void cancel(OrdersCancelDTO ordersCancelDTO) throws Exception {
 //        根据id查询订单
-        Orders orderDB = orderMapper.getById(ordersCancelDTO.getId());
+        Orders orderDB = orderMapper.selectById(ordersCancelDTO.getId());
 
 //        支付状态
         Integer payStatus = orderDB.getPayStatus();
@@ -446,7 +495,7 @@ public class OrderServiceImpl implements OrderService {
         orders.setStatus(Orders.CANCELLED);
         orders.setCancelReason(ordersCancelDTO.getCancelReason());
         orders.setCancelTime(LocalDateTime.now());
-        orderMapper.update(orders);
+        orderMapper.updateById(orders);
     }
 
     /**
@@ -456,7 +505,7 @@ public class OrderServiceImpl implements OrderService {
     @Override
     public void delivery(Long id) {
 //        根据id查询订单
-        Orders orderDB = orderMapper.getById(id);
+        Orders orderDB = orderMapper.selectById(id);
 
 //        校验订单是否存在，并且状态为3
         if (orderDB == null || !orderDB.getStatus().equals(Orders.CONFIRMED)) {
@@ -469,7 +518,7 @@ public class OrderServiceImpl implements OrderService {
 //        更新订单状态，状态转为派送中
         orders.setStatus(Orders.DELIVERY_IN_PROGRESS);
 
-        orderMapper.update(orders);
+        orderMapper.updateById(orders);
     }
 
     /**
@@ -479,7 +528,7 @@ public class OrderServiceImpl implements OrderService {
     @Override
     public void complete(Long id) {
 //        根据id查询订单
-        Orders orderDB = orderMapper.getById(id);
+        Orders orderDB = orderMapper.selectById(id);
 
 //        校验订单是否存在，并且状态为4
         if (orderDB == null || !orderDB.getStatus().equals(Orders.DELIVERY_IN_PROGRESS)) {
@@ -487,13 +536,13 @@ public class OrderServiceImpl implements OrderService {
         }
 
         Orders orders = new Orders();
-        orders.setId(orders.getId());
+        orders.setId(id);
 
 //        更新订单状态，状态转为完成
-        orders.setStatus(Orders.CONFIRMED);
+        orders.setStatus(Orders.COMPLETED);
         orders.setDeliveryTime(LocalDateTime.now());
 
-        orderMapper.update(orders);
+        orderMapper.updateById(orders);
     }
 
     /**
@@ -503,7 +552,7 @@ public class OrderServiceImpl implements OrderService {
     @Override
     public void reminder(Long id) {
 //        查询订单是否存在
-        Orders orders = orderMapper.getById(id);
+        Orders orders = orderMapper.selectById(id);
         if (orders == null) {
             throw new OrderBusinessException(MessageConstant.ORDER_NOT_FOUND);
         }
@@ -521,11 +570,10 @@ public class OrderServiceImpl implements OrderService {
      * @param page
      * @return
      */
-    private List<OrderVO> getOrderVoList(Page<Orders> page) {
+    private List<OrderVO> getOrderVoList(List<Orders> ordersList) {
 //        需要返回订单菜品信息，自定义OrderVo响应结果
         ArrayList<OrderVO> orderVOArrayList = new ArrayList<>();
 
-        List<Orders> ordersList = page.getResult();
         if (!CollectionUtils.isEmpty(ordersList)) {
             ordersList.forEach(orders -> {
                 OrderVO orderVO = new OrderVO();
@@ -546,7 +594,7 @@ public class OrderServiceImpl implements OrderService {
      */
     private String getOrderDishStr(Orders orders) {
 //        查询订单菜品详情信息（订单中的菜品和数量）
-        List<OrderDetail> orderDetailList = orderDetailMapper.getByOrderId(orders.getId());
+        List<OrderDetail> orderDetailList = orderDetailMapper.selectList(new LambdaQueryWrapper<OrderDetail>().eq(OrderDetail::getOrderId, orders.getId()));
 
 //        将每一条订单菜品信息拼接为字符串（格式：宫保鸡丁*3；）
         List<String> ordewrDishList = orderDetailList.stream().map(orderDetail -> orderDetail.getName() + "*" + orderDetail.getNumber() + ";").collect(Collectors.toList());
@@ -560,60 +608,59 @@ public class OrderServiceImpl implements OrderService {
      * @param address
      */
     private void checkOutOfRange(String address) {
+        // TODO: 临时跳过地图校验，测试完后恢复
+        /*
         HashMap map = new HashMap();
         map.put("address", shopAddress);
-        map.put("output", "json");
-        map.put("ak", ak);
+        map.put("key", amapKey);
 
-//        获取店铺的经纬度坐标
-        String shopCoordinate = HttpClientUtil.doGet("https://api.map.baidu.com/geocoding/v3", map);
+//        获取店铺的经纬度坐标（高德地理编码）
+        String shopCoordinate = HttpClientUtil.doGet("https://restapi.amap.com/v3/geocode/geo", map);
 
         JSONObject jsonObject = JSON.parseObject(shopCoordinate);
-        if (!jsonObject.getString("status").equals("0")) {
-            throw new OrderBusinessException("店铺地址解析失败");
+        if (!"1".equals(jsonObject.getString("status"))) {
+            throw new OrderBusinessException("店铺地址解析失败: " + jsonObject.getString("info"));
         }
 
-//        数据解析
-        JSONObject location = jsonObject.getJSONObject("result").getJSONObject("location");
-        String lat = location.getString("lat");
-        String lng = location.getString("lng");
-
-//        店铺经纬度坐标
-        String shopLngLat = lat + "," + lng;
+//        数据解析：高德 location 返回格式为 "lng,lat"
+        JSONArray geocodes = jsonObject.getJSONArray("geocodes");
+        String shopLocation = geocodes.getJSONObject(0).getString("location");
 
         map.put("address", address);
 
 //        获取用户地址的经纬度坐标
-        String userCoordinate = HttpClientUtil.doGet("https://api.map.baidu.com/geocoding/v3", map);
+        String userCoordinate = HttpClientUtil.doGet("https://restapi.amap.com/v3/geocode/geo", map);
 
-//        数据解析
-        location = JSON.parseObject("result").getJSONObject("location");
-        lat = location.getString("lat");
-        lng = location.getString("lng");
+        jsonObject = JSON.parseObject(userCoordinate);
+        if (!"1".equals(jsonObject.getString("status"))) {
+            throw new OrderBusinessException("用户地址解析失败: " + jsonObject.getString("info"));
+        }
 
-//        用户收货地址经纬度坐标
-        String userLngLat = lat + "," + lng;
+        geocodes = jsonObject.getJSONArray("geocodes");
+        String userLocation = geocodes.getJSONObject(0).getString("location");
 
-        map.put("orgin", shopLngLat);
-        map.put("destination", userLngLat);
-        map.put("steps_info", "0");
+//        路线规划（高德驾车路径规划）
+        HashMap routeMap = new HashMap();
+        routeMap.put("origin", shopLocation);
+        routeMap.put("destination", userLocation);
+        routeMap.put("key", amapKey);
 
-        //路线规划
-        String json = HttpClientUtil.doGet("https://api.map.baidu.com/directionlite/v1/driving", map);
+        String routeJson = HttpClientUtil.doGet("https://restapi.amap.com/v3/direction/driving", routeMap);
 
-        jsonObject = JSON.parseObject(json);
-        if (!jsonObject.getString("status").equals("0")) {
-            throw new OrderBusinessException("配送线路规划失败");
+        JSONObject routeObject = JSON.parseObject(routeJson);
+        if (!"1".equals(routeObject.getString("status"))) {
+            throw new OrderBusinessException("配送线路规划失败: " + routeObject.getString("info"));
         }
 
 //        数据解析
-        JSONObject result = jsonObject.getJSONObject("result");
-        JSONArray jsonArray = (JSONArray) result.get("routes");
-        Integer distance = (Integer) ((JSONObject) jsonArray.get(0)).get("distance");
+        JSONObject route = routeObject.getJSONObject("route");
+        JSONArray paths = route.getJSONArray("paths");
+        Integer distance = Integer.parseInt(paths.getJSONObject(0).getString("distance"));
 
         if(distance > 5000){
             //配送距离超过5000米
             throw new OrderBusinessException("超出配送范围");
         }
+        */
     }
 }
