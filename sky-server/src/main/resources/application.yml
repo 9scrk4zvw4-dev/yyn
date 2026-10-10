@@ -1,5 +1,9 @@
 server:
   port: 8080
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
 
 spring:
   profiles:
@@ -65,7 +69,7 @@ sky:
   amap:
     key: ${sky.amap.key}
   ai:
-    dashscope:
-      api-key: ${sky.ai.dashscope.api-key}
-      model: ${sky.ai.dashscope.model}
-      base-url: ${sky.ai.dashscope.base-url}
+    ollama:
+      base-url: http://localhost:11434
+      model-name: qwen3:0.6b
+      api-key: ollama

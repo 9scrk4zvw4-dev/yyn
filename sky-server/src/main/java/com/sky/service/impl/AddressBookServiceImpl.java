@@ -45,7 +45,7 @@ public class AddressBookServiceImpl implements AddressBookService {
     @Override
     public void save(AddressBook addressBook) {
         addressBook.setUserId(BaseContext.getCurrentId());
-        addressBook.setIsDefault(0);
+        addressBook.setIsDefault(Integer.valueOf(0));
         addressBookMapper.insert(addressBook);
     }
 
@@ -75,14 +75,14 @@ public class AddressBookServiceImpl implements AddressBookService {
     @Override
     public void setDefault(AddressBook addressBook) {
         //1、将当前用户的所有地址修改为非默认地址 update address_book set is_default = ? where user_id = ?
-        addressBook.setIsDefault(0);
+        addressBook.setIsDefault(Integer.valueOf(0));
         addressBook.setUserId(BaseContext.getCurrentId());
         LambdaUpdateWrapper<AddressBook> wrapper=new LambdaUpdateWrapper<>();
         wrapper.eq(AddressBook::getUserId,addressBook.getUserId()).set(AddressBook::getIsDefault,addressBook.getIsDefault());
         addressBookMapper.update(null,wrapper);
 
         //2、将当前地址改为默认地址 update address_book set is_default = ? where id = ?
-        addressBook.setIsDefault(1);
+        addressBook.setIsDefault(Integer.valueOf(1));
         addressBookMapper.updateById(addressBook);
     }
 

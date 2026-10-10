@@ -5,13 +5,11 @@ import lombok.Data;
 import java.io.Serializable;
 
 /**
- * AI管家对话请求DTO
+ * AI 管家对话请求
  */
 @Data
 public class ChatRequestDTO implements Serializable {
 
-    /**
-     * 用户输入的消息
-     */
+    // 用户提问内容
     private String message;
 }
